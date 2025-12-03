@@ -120,6 +120,21 @@ async function main() {
             return currency ? `${clean} (${currency})` : clean;
         };
 
+        const isListUrl = (u) => {
+            try {
+                const parsed = new URL(u);
+                return parsed.pathname.includes('/jobs');
+            } catch {
+                return false;
+            }
+        };
+
+        const buildPageUrlWithParam = (u, page) => {
+            const parsed = new URL(u);
+            parsed.searchParams.set('page', page);
+            return parsed.href;
+        };
+
         const resolveNextPageUrl = ($, request, pageNo, hasJobsOnPage) => {
             const nextPage = pageNo + 1;
             if (nextPage > MAX_PAGES) return null;
@@ -154,6 +169,57 @@ async function main() {
             const urlObj = new URL(request.url);
             urlObj.searchParams.set('page', nextPage);
             return urlObj.href;
+        };
+
+        const resolveNextPageUrlFixed = ($, request, pageNo, hasJobsOnPage) => {
+            const nextPage = pageNo + 1;
+            if (nextPage > MAX_PAGES) return null;
+
+            const labelledSelector = [
+                'a.button._pageItem_1qfbl_213.focus-dark[rel="next"]',
+                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="next" i]',
+                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="weiter" i]',
+                'a[rel="next"]',
+                'a[aria-label*="next" i]',
+                'a[aria-label*="weiter" i]',
+                'a:contains("Weiter")',
+                'a:contains("Nächste")',
+                'a:contains("N\\u00e4chste")',
+                'a:contains(">")',
+                'a:contains("»")',
+                'a:contains("›")',
+            ].join(', ');
+            const labelled = $(labelledSelector)
+                .filter((_, el) => !$(el).hasClass('disabled'))
+                .first()
+                .attr('href');
+            if (labelled) return new URL(labelled, request.url).href;
+
+            const numberedCandidate = $('a[class*="pageItem"], a[class*="_pageItem"], a.button')
+                .filter((_, el) => $(el).text().trim() === String(nextPage))
+                .first()
+                .attr('href');
+            if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
+
+            if (!hasJobsOnPage) return null;
+            const urlObj = new URL(request.url);
+            urlObj.searchParams.set('page', nextPage);
+            return urlObj.href;
+        };
+
+        const seedListPages = async (urls) => {
+            for (const base of urls) {
+                if (!base) continue;
+                if (!isListUrl(base)) {
+                    await requestQueue.addRequest({ url: base, userData: { label: collectDetails ? 'DETAIL' : 'LIST', pageNo: 1 } });
+                    continue;
+                }
+                const startPage = Number(new URL(base).searchParams.get('page')) || 1;
+                for (let p = startPage; p <= MAX_PAGES; p++) {
+                    const pageUrl = buildPageUrlWithParam(base, p);
+                    await requestQueue.addRequest({ url: pageUrl, userData: { label: 'LIST', pageNo: p } });
+                }
+            }
         };
 
         const extractFromJsonLd = ($) => {
@@ -348,7 +414,7 @@ async function main() {
                     }
 
                     if (saved < RESULTS_WANTED && pageNo < MAX_PAGES) {
-                        const nextUrl = resolveNextPageUrl($, request, pageNo, jobLinks.length > 0);
+                        const nextUrl = resolveNextPageUrlFixed($, request, pageNo, jobLinks.length > 0);
                         if (nextUrl) {
                             crawlerLog.info(`Enqueueing next page: ${nextUrl}`);
                             await requestQueue.addRequest({
@@ -436,13 +502,8 @@ async function main() {
         const queueInfoAfterApi = await requestQueue.getInfo();
         const hasPending = (queueInfoAfterApi?.pendingRequestCount || 0) > 0;
 
-        if (saved + detailQueued < RESULTS_WANTED && (!hasPending || initial.length)) {
-            for (const u of initial) {
-                await requestQueue.addRequest({
-                    url: u,
-                    userData: { label: 'LIST', pageNo: 1 },
-                });
-            }
+        if (saved + detailQueued < RESULTS_WANTED) {
+            await seedListPages(initial);
         }
 
         log.info('Starting crawler...');
