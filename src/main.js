@@ -207,7 +207,7 @@ async function main() {
             return $.root().text().replace(/\s+/g, ' ').trim();
         };
 
-        const tryFetchJobsViaApi = async (page = 1) => {
+        const tryFetchJobsViaApi = async (pageIndex = 0) => {
             try {
                 const apiUrl = 'https://www.kununu.com/api/v1/jobs/search';
                 const params = new URLSearchParams();
@@ -217,7 +217,8 @@ async function main() {
                 if (homeOffice) params.append('homeOffice', 'true');
                 if (employmentType) params.append('employmentType', employmentType);
                 if (careerLevel) params.append('careerLevel', careerLevel);
-                params.append('page', page);
+                // Kununu pagination appears zero-based; use pageIndex directly.
+                params.append('page', pageIndex);
                 params.append('limit', 50); // Kununu may still return ~30, that's fine.
 
                 const response = await gotScraping({
@@ -268,15 +269,15 @@ async function main() {
         if (!startUrl && !url && !startUrls) {
             log.info('Attempting API-based scraping...');
 
-            for (let page = 1; page <= MAX_PAGES && saved < RESULTS_WANTED; page++) {
-                const jobs = await tryFetchJobsViaApi(page);
+            for (let pageIndex = 0; pageIndex < MAX_PAGES && saved < RESULTS_WANTED; pageIndex++) {
+                const jobs = await tryFetchJobsViaApi(pageIndex);
 
                 if (!jobs || jobs.length === 0) {
-                    log.info(`No more jobs from API at page ${page}. Switching to HTML parsing.`);
+                    log.info(`No more jobs from API at page index ${pageIndex}. Switching to HTML parsing.`);
                     break;
                 }
 
-                log.info(`API returned ${jobs.length} jobs from page ${page}`);
+                log.info(`API returned ${jobs.length} jobs from page index ${pageIndex}`);
 
                 for (const job of jobs) {
                     if (saved >= RESULTS_WANTED) break;
@@ -453,11 +454,16 @@ async function main() {
         const queueInfoAfterApi = await requestQueue.getInfo();
         const hasPending = (queueInfoAfterApi?.pendingRequestCount || 0) > 0;
 
-        if (saved + detailQueued < RESULTS_WANTED && (!hasPending || initial.length)) {
+        if (saved + detailQueued < RESULTS_WANTED) {
             for (const u of initial) {
+                if (!u) continue;
+                let pageNo = 1;
+                try {
+                    pageNo = Number(new URL(u).searchParams.get('page')) || 1;
+                } catch { /* ignore */ }
                 await requestQueue.addRequest({
                     url: u,
-                    userData: { label: 'LIST', pageNo: 1 },
+                    userData: { label: 'LIST', pageNo },
                 });
             }
         }

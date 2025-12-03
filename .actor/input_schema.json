@@ -84,7 +84,7 @@
       "description": "Crawler concurrency (1-50). Increase for speed, lower if the site throttles.",
       "minimum": 1,
       "maximum": 50,
-      "default": 12,
+      "default": 20,
       "editor": "number"
     },
     "proxyConfiguration": {
