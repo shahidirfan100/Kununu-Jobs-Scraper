@@ -124,26 +124,31 @@ async function main() {
             const nextPage = pageNo + 1;
             if (nextPage > MAX_PAGES) return null;
 
-            const labelledSelector = 'a[rel="next"], a[aria-label*="next" i], a[aria-label*="weiter" i], a:contains("Weiter"), a:contains("Nächste"), a:contains(">")';
+            const labelledSelector = [
+                'a.button._pageItem_1qfbl_213.focus-dark[rel="next"]',
+                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="next" i]',
+                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="weiter" i]',
+                'a[rel="next"]',
+                'a[aria-label*="next" i]',
+                'a[aria-label*="weiter" i]',
+                'a:contains("Weiter")',
+                'a:contains("Nächste")',
+                'a:contains("N\u00e4chste")',
+                'a:contains(">")',
+                'a:contains("»")',
+                'a:contains("›")',
+            ].join(', ');
             const labelled = $(labelledSelector)
                 .filter((_, el) => !$(el).hasClass('disabled'))
                 .first()
                 .attr('href');
             if (labelled) return new URL(labelled, request.url).href;
 
-            let numberedHref = null;
-            $('a').each((_, el) => {
-                const text = $(el).text().trim();
-                if (text === String(nextPage)) {
-                    const href = $(el).attr('href');
-                    if (href) {
-                        numberedHref = new URL(href, request.url).href;
-                        return false;
-                    }
-                }
-                return undefined;
-            });
-            if (numberedHref) return numberedHref;
+            const numberedCandidate = $('a[class*="pageItem"], a[class*="_pageItem"], a.button')
+                .filter((_, el) => $(el).text().trim() === String(nextPage))
+                .first()
+                .attr('href');
+            if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
 
             if (!hasJobsOnPage) return null;
             const urlObj = new URL(request.url);
@@ -351,7 +356,7 @@ async function main() {
                                 userData: { label: 'LIST', pageNo: pageNo + 1 },
                             });
                         } else {
-                            crawlerLog.info('No next page found (or max_pages reached)');
+                            crawlerLog.info(`No next page found at page ${pageNo} (max_pages=${MAX_PAGES}, jobsOnPage=${jobLinks.length})`);
                         }
                     }
                     return;
