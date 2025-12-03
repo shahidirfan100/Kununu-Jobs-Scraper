@@ -25,19 +25,29 @@ async function main() {
             proxyConfiguration,
         } = input;
 
-        const RESULTS_WANTED = Number.isFinite(+RESULTS_WANTED_RAW) ? Math.max(1, +RESULTS_WANTED_RAW) : Number.MAX_SAFE_INTEGER;
-        const MAX_PAGES = Number.isFinite(+MAX_PAGES_RAW) ? Math.max(1, +MAX_PAGES_RAW) : 50;
+        const RESULTS_WANTED = Number.isFinite(+RESULTS_WANTED_RAW)
+            ? Math.max(1, +RESULTS_WANTED_RAW)
+            : Number.MAX_SAFE_INTEGER;
+
+        const MAX_PAGES = Number.isFinite(+MAX_PAGES_RAW)
+            ? Math.max(1, +MAX_PAGES_RAW)
+            : 50;
+
         const MAX_CONCURRENCY = Number.isFinite(+maxConcurrencyInput) && +maxConcurrencyInput > 0
             ? Math.min(+maxConcurrencyInput, 50)
-            : 12; // conservative default to reduce blocking
+            : 20;
 
-        const proxyConf = proxyConfiguration ? await Actor.createProxyConfiguration({ ...proxyConfiguration }) : undefined;
+        const proxyConf = proxyConfiguration
+            ? await Actor.createProxyConfiguration({ ...proxyConfiguration })
+            : undefined;
+
         const requestQueue = await Actor.openRequestQueue();
 
         let saved = 0;
-        const seenUrls = new Set();
         let detailQueued = 0;
+        const seenUrls = new Set();
 
+        // Build Kununu search URL
         const buildSearchUrl = (title, loc, page = 1) => {
             let newUrl = 'https://www.kununu.com/de/jobs';
             const params = [];
@@ -58,7 +68,9 @@ async function main() {
             if (Array.isArray(jobLocation)) jobLocation = jobLocation[0];
             const addr = jobLocation.address;
             if (!addr) return null;
-            return [addr.addressLocality, addr.addressRegion, addr.addressCountry].filter(Boolean).join(', ') || null;
+            return [addr.addressLocality, addr.addressRegion, addr.addressCountry]
+                .filter(Boolean)
+                .join(', ') || null;
         };
 
         const parseSalaryNumber = (value) => {
@@ -90,7 +102,11 @@ async function main() {
                 || baseSalary.currencyCode
                 || baseSalary?.value?.currency
                 || 'EUR';
-            const value = typeof baseSalary.value === 'object' ? baseSalary.value : baseSalary;
+
+            const value = typeof baseSalary.value === 'object'
+                ? baseSalary.value
+                : baseSalary;
+
             const min = parseSalaryNumber(value?.minValue ?? value?.value);
             const max = parseSalaryNumber(value?.maxValue);
 
@@ -102,8 +118,13 @@ async function main() {
             if (typeof raw === 'number') return formatSalaryRange(raw, null, 'EUR');
             if (typeof raw === 'object') return extractSalary(raw);
 
-            const clean = String(raw).replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').trim();
+            const clean = String(raw)
+                .replace(/\s+/g, ' ')
+                .replace(/\u00a0/g, ' ')
+                .trim();
+
             if (!clean) return null;
+
             const currency = /\u20ac|eur/i.test(clean) ? 'EUR' : undefined;
             const numbers = [...clean.matchAll(/\d[\d.,\s]*\d/g)]
                 .map((m) => parseSalaryNumber(m[0]))
@@ -115,17 +136,19 @@ async function main() {
                 return formatSalaryRange(min, max, currency);
             }
 
-            if (numbers.length === 1) return formatSalaryRange(numbers[0], null, currency) || clean;
+            if (numbers.length === 1) {
+                return formatSalaryRange(numbers[0], null, currency) || clean;
+            }
 
             return currency ? `${clean} (${currency})` : clean;
         };
 
-        // -------- PAGINATION HELPER (HTML LIST) --------
+        // -------- HTML pagination helper --------
         const resolveNextPageUrl = ($, request, pageNo, hasJobsOnPage) => {
             const nextPage = pageNo + 1;
             if (nextPage > MAX_PAGES) return null;
 
-            // Try various "next" link selectors first
+            // Try "next" buttons
             const labelledSelector = [
                 'a.button._pageItem_1qfbl_213.focus-dark[rel="next"]',
                 'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="next" i]',
@@ -135,7 +158,7 @@ async function main() {
                 'a[aria-label*="weiter" i]',
                 'a:contains("Weiter")',
                 'a:contains("Nächste")',
-                'a:contains("N\\u00e4chste")',
+                'a:contains("N\u00e4chste")',
                 'a:contains(">")',
                 'a:contains("»")',
                 'a:contains("›")',
@@ -148,27 +171,29 @@ async function main() {
 
             if (labelled) return new URL(labelled, request.url).href;
 
-            // NEW: fall back to numbered links or any link containing the next page query
-            const numberedCandidate = $('a[href]')
+            // Try numbered page link, e.g. "2"
+            const numberedCandidate = $(
+                'a[class*="pageItem"], a[class*="_pageItem"], a.button',
+            )
                 .filter((_, el) => {
                     const text = $(el).text().trim();
+                    if (text !== String(nextPage)) return false;
                     const href = $(el).attr('href') || '';
                     if (!href || href === '#' || href.startsWith('javascript:')) return false;
-                    if (text === String(nextPage)) return true;
-                    return href.includes(`page=${nextPage}`);
+                    return true;
                 })
                 .first()
                 .attr('href');
 
             if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
 
-            // FINAL fallback: increment ?page= param directly
+            // Fallback: if there were jobs, try ?page=N
+            if (!hasJobsOnPage) return null;
             const urlObj = new URL(request.url);
-            const currentFromQuery = Number(urlObj.searchParams.get('page')) || pageNo;
-            urlObj.searchParams.set('page', currentFromQuery + 1);
+            urlObj.searchParams.set('page', nextPage);
             return urlObj.href;
         };
-        // -------- END PAGINATION HELPER --------
+        // -------- end HTML pagination helper --------
 
         const extractFromJsonLd = ($) => {
             const scripts = $('script[type="application/ld+json"]');
@@ -179,7 +204,10 @@ async function main() {
                     for (const item of arr) {
                         if (!item) continue;
                         const type = item['@type'] || item.type;
-                        if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) {
+                        if (
+                            type === 'JobPosting'
+                            || (Array.isArray(type) && type.includes('JobPosting'))
+                        ) {
                             return {
                                 title: item.title || item.name || null,
                                 company: item.hiringOrganization?.name || null,
@@ -207,7 +235,7 @@ async function main() {
             return $.root().text().replace(/\s+/g, ' ').trim();
         };
 
-        const tryFetchJobsViaApi = async (pageIndex = 0) => {
+        const tryFetchJobsViaApi = async (page = 1) => {
             try {
                 const apiUrl = 'https://www.kununu.com/api/v1/jobs/search';
                 const params = new URLSearchParams();
@@ -217,9 +245,9 @@ async function main() {
                 if (homeOffice) params.append('homeOffice', 'true');
                 if (employmentType) params.append('employmentType', employmentType);
                 if (careerLevel) params.append('careerLevel', careerLevel);
-                // Kununu uses 1-based page query for public results; shift by +1.
-                params.append('page', pageIndex + 1);
-                params.append('limit', 50); // Kununu may still return ~30, that's fine.
+
+                params.append('page', page);
+                params.append('limit', 50);
 
                 const response = await gotScraping({
                     url: `${apiUrl}?${params.toString()}`,
@@ -245,7 +273,9 @@ async function main() {
                         employment_type: job.employmentType,
                         salary: normalizeSalary(job.salary || job.salaryText),
                         date_posted: job.publishedAt || job.datePosted,
-                        url: job.url || `https://www.kununu.com/de/job/${job.id || job.uuid}`,
+                        url:
+                            job.url
+                            || `https://www.kununu.com/de/job/${job.id || job.uuid}`,
                         source: 'api',
                     }));
                 }
@@ -255,7 +285,7 @@ async function main() {
             return null;
         };
 
-        // Build initial URLs (for HTML mode)
+        // Build initial URLs (for HTML fallback)
         const initial = [];
         if (Array.isArray(startUrls) && startUrls.length) {
             initial.push(...startUrls);
@@ -265,19 +295,19 @@ async function main() {
             initial.push(buildSearchUrl(jobTitle, location, 1));
         }
 
-        // -------- API-FIRST MODE --------
+        // -------- API-first scraping --------
         if (!startUrl && !url && !startUrls) {
             log.info('Attempting API-based scraping...');
 
-            for (let pageIndex = 0; pageIndex < MAX_PAGES && saved < RESULTS_WANTED; pageIndex++) {
-                const jobs = await tryFetchJobsViaApi(pageIndex);
+            for (let page = 1; page <= MAX_PAGES && saved < RESULTS_WANTED; page++) {
+                const jobs = await tryFetchJobsViaApi(page);
 
                 if (!jobs || jobs.length === 0) {
-                    log.info(`No more jobs from API at page index ${pageIndex}. Switching to HTML parsing.`);
+                    log.info(`No more jobs from API at page ${page}. Switching to HTML parsing.`);
                     break;
                 }
 
-                log.info(`API returned ${jobs.length} jobs from page index ${pageIndex}`);
+                log.info(`API returned ${jobs.length} jobs from page ${page}`);
 
                 for (const job of jobs) {
                     if (saved >= RESULTS_WANTED) break;
@@ -300,7 +330,9 @@ async function main() {
                     }
                 }
 
-                // Keep paging until API returns 0 jobs (or limits reached).
+                // IMPORTANT FIX: removed the premature stop:
+                // if (jobs.length < 50) break;
+                // Kununu returns ~30 per page even when more pages exist.
             }
 
             const queueInfo = await requestQueue.getInfo();
@@ -310,7 +342,7 @@ async function main() {
                 return;
             }
         }
-        // -------- END API-FIRST MODE --------
+        // -------- end API-first scraping --------
 
         const crawler = new CheerioCrawler({
             requestQueue,
@@ -318,29 +350,11 @@ async function main() {
             maxRequestRetries: 2,
             useSessionPool: true,
             sessionPoolOptions: {
-                maxPoolSize: Math.max(6, Math.ceil(MAX_CONCURRENCY)),
-                sessionOptions: { maxUsageCount: 8 },
+                maxPoolSize: Math.max(4, Math.ceil(MAX_CONCURRENCY / 2)),
+                sessionOptions: { maxUsageCount: 20 },
             },
             maxConcurrency: MAX_CONCURRENCY,
             requestHandlerTimeoutSecs: 60,
-            useHeaderGenerator: true,
-            headerGeneratorOptions: {
-                browsers: ['chrome', 'firefox'],
-                devices: ['desktop'],
-                locales: ['de-DE', 'en-US'],
-            },
-            preNavigationHooks: [
-                async ({ request }) => {
-                    request.headers = {
-                        ...request.headers,
-                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                        'cache-control': 'no-cache',
-                        pragma: 'no-cache',
-                    };
-                },
-            ],
 
             async requestHandler({ request, $, log: crawlerLog }) {
                 const label = request.userData?.label || 'LIST';
@@ -367,24 +381,34 @@ async function main() {
                         const remaining = RESULTS_WANTED - saved - detailQueued;
                         const toEnqueue = jobLinks.slice(0, Math.max(0, remaining));
                         for (const u of toEnqueue) {
-                            await requestQueue.addRequest({ url: u, userData: { label: 'DETAIL' } });
+                            await requestQueue.addRequest({
+                                url: u,
+                                userData: { label: 'DETAIL' },
+                            });
                             detailQueued++;
                         }
                     } else if (jobLinks.length) {
                         const remaining = RESULTS_WANTED - saved;
                         const toPush = jobLinks.slice(0, Math.max(0, remaining));
-                        await Dataset.pushData(toPush.map((u) => ({
-                            url: u,
-                            title: null,
-                            company: null,
-                            location: null,
-                            source: 'kununu',
-                        })));
+                        await Dataset.pushData(
+                            toPush.map((u) => ({
+                                url: u,
+                                title: null,
+                                company: null,
+                                location: null,
+                                source: 'kununu',
+                            })),
+                        );
                         saved += toPush.length;
                     }
 
                     if (saved < RESULTS_WANTED && pageNo < MAX_PAGES) {
-                        const nextUrl = resolveNextPageUrl($, request, pageNo, jobLinks.length > 0);
+                        const nextUrl = resolveNextPageUrl(
+                            $,
+                            request,
+                            pageNo,
+                            jobLinks.length > 0,
+                        );
                         if (nextUrl) {
                             crawlerLog.info(`Enqueueing next page: ${nextUrl}`);
                             await requestQueue.addRequest({
@@ -392,14 +416,19 @@ async function main() {
                                 userData: { label: 'LIST', pageNo: pageNo + 1 },
                             });
                         } else {
-                            crawlerLog.info(`No next page found at page ${pageNo} (max_pages=${MAX_PAGES}, jobsOnPage=${jobLinks.length})`);
+                            crawlerLog.info(
+                                `No next page found at page ${pageNo} (max_pages=${MAX_PAGES}, jobsOnPage=${jobLinks.length})`,
+                            );
                         }
                     }
                     return;
                 }
 
                 if (label === 'DETAIL') {
-                    const decrementQueue = () => { detailQueued = Math.max(0, detailQueued - 1); };
+                    const decrementQueue = () => {
+                        detailQueued = Math.max(0, detailQueued - 1);
+                    };
+
                     if (saved >= RESULTS_WANTED) {
                         decrementQueue();
                         return;
@@ -413,34 +442,65 @@ async function main() {
                         data = { ...apiData, ...data };
 
                         if (!data.title) {
-                            data.title = $('h1, [class*="jobTitle"], [class*="job-title"]').first().text().trim() || null;
+                            data.title = $(
+                                'h1, [class*="jobTitle"], [class*="job-title"]',
+                            )
+                                .first()
+                                .text()
+                                .trim() || null;
                         }
 
                         if (!data.company) {
-                            data.company = $('[class*="company"], [data-testid*="company"]').first().text().trim() || null;
+                            data.company = $(
+                                '[class*="company"], [data-testid*="company"]',
+                            )
+                                .first()
+                                .text()
+                                .trim() || null;
                         }
 
                         if (!data.location) {
-                            data.location = $('[class*="location"], [class*="Location"]').first().text().trim() || null;
+                            data.location = $(
+                                '[class*="location"], [class*="Location"]',
+                            )
+                                .first()
+                                .text()
+                                .trim() || null;
                         }
 
                         if (!data.employment_type) {
-                            data.employment_type = $('[class*="employmentType"], [class*="job-type"]').first().text().trim() || null;
+                            data.employment_type = $(
+                                '[class*="employmentType"], [class*="job-type"]',
+                            )
+                                .first()
+                                .text()
+                                .trim() || null;
                         }
 
                         if (!data.salary) {
-                            const salaryText = $('[class*="salary"], [class*="Salary"]').first().text().trim();
+                            const salaryText = $(
+                                '[class*="salary"], [class*="Salary"]',
+                            )
+                                .first()
+                                .text()
+                                .trim();
                             data.salary = normalizeSalary(salaryText);
                         } else {
                             data.salary = normalizeSalary(data.salary);
                         }
 
                         if (!data.description_html) {
-                            const desc = $('[class*="job-description"], [class*="jobDescription"], [class*="description"]').first();
-                            data.description_html = desc && desc.length ? desc.html()?.trim() : null;
+                            const desc = $(
+                                '[class*="job-description"], [class*="jobDescription"], [class*="description"]',
+                            ).first();
+                            data.description_html = desc && desc.length
+                                ? desc.html()?.trim()
+                                : null;
                         }
 
-                        data.description_text = data.description_html ? cleanText(data.description_html) : null;
+                        data.description_text = data.description_html
+                            ? cleanText(data.description_html)
+                            : null;
 
                         const item = {
                             title: data.title || null,
@@ -459,9 +519,13 @@ async function main() {
 
                         await Dataset.pushData(item);
                         saved++;
-                        crawlerLog.info(`Saved job ${saved}/${RESULTS_WANTED}: ${item.title}`);
+                        crawlerLog.info(
+                            `Saved job ${saved}/${RESULTS_WANTED}: ${item.title}`,
+                        );
                     } catch (err) {
-                        crawlerLog.error(`DETAIL ${request.url} failed: ${err.message}`);
+                        crawlerLog.error(
+                            `DETAIL ${request.url} failed: ${err.message}`,
+                        );
                     } finally {
                         decrementQueue();
                     }
@@ -472,16 +536,11 @@ async function main() {
         const queueInfoAfterApi = await requestQueue.getInfo();
         const hasPending = (queueInfoAfterApi?.pendingRequestCount || 0) > 0;
 
-        if (saved + detailQueued < RESULTS_WANTED) {
+        if (saved + detailQueued < RESULTS_WANTED && (!hasPending || initial.length)) {
             for (const u of initial) {
-                if (!u) continue;
-                let pageNo = 1;
-                try {
-                    pageNo = Number(new URL(u).searchParams.get('page')) || 1;
-                } catch { /* ignore */ }
                 await requestQueue.addRequest({
                     url: u,
-                    userData: { label: 'LIST', pageNo },
+                    userData: { label: 'LIST', pageNo: 1 },
                 });
             }
         }
