@@ -112,7 +112,7 @@ Configure the scraper using these parameters:
   <td><code>maxConcurrency</code></td>
   <td>Integer</td>
   <td>Crawler concurrency (1-50). Increase for speed, lower if the site throttles.</td>
-  <td>20</td>
+  <td>12</td>
   </tr>
   <tr>
   <td><code>proxyConfiguration</code></td>
