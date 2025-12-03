@@ -29,7 +29,7 @@ async function main() {
         const MAX_PAGES = Number.isFinite(+MAX_PAGES_RAW) ? Math.max(1, +MAX_PAGES_RAW) : 50;
         const MAX_CONCURRENCY = Number.isFinite(+maxConcurrencyInput) && +maxConcurrencyInput > 0
             ? Math.min(+maxConcurrencyInput, 50)
-            : 12; // safer default to reduce cost
+            : 20;
 
         const proxyConf = proxyConfiguration ? await Actor.createProxyConfiguration({ ...proxyConfiguration }) : undefined;
         const requestQueue = await Actor.openRequestQueue();
@@ -41,12 +41,14 @@ async function main() {
         const buildSearchUrl = (title, loc, page = 1) => {
             let newUrl = 'https://www.kununu.com/de/jobs';
             const params = [];
+
             if (title) params.push(`q=${encodeURIComponent(title)}`);
             if (loc) params.push(`l=${encodeURIComponent(loc)}`);
             if (homeOffice) params.push('w=home-office');
             if (employmentType) params.push(`m=${encodeURIComponent(employmentType)}`);
             if (careerLevel) params.push(`t=${encodeURIComponent(careerLevel)}`);
             if (page > 1) params.push(`page=${page}`);
+
             if (params.length) newUrl += `?${params.join('&')}`;
             return newUrl;
         };
@@ -80,28 +82,10 @@ async function main() {
             return null;
         };
 
-        const normalizeSalary = (raw) => {
-            if (!raw) return null;
-            if (typeof raw === 'number') return formatSalaryRange(raw, null, 'EUR');
-            if (typeof raw === 'object') return extractSalary(raw);
-            const clean = String(raw).replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').trim();
-            if (!clean) return null;
-            const currency = /\u20ac|eur/i.test(clean) ? 'EUR' : undefined;
-            const numbers = [...clean.matchAll(/\d[\d.,\s]*\d/g)]
-                .map((m) => parseSalaryNumber(m[0]))
-                .filter((n) => Number.isFinite(n));
-            if (numbers.length >= 2) {
-                const min = Math.min(...numbers);
-                const max = Math.max(...numbers);
-                return formatSalaryRange(min, max, currency);
-            }
-            if (numbers.length === 1) return formatSalaryRange(numbers[0], null, currency) || clean;
-            return currency ? `${clean} (${currency})` : clean;
-        };
-
         const extractSalary = (baseSalary) => {
             if (!baseSalary) return null;
             if (typeof baseSalary === 'string') return normalizeSalary(baseSalary);
+
             const currency = baseSalary.currency
                 || baseSalary.currencyCode
                 || baseSalary?.value?.currency
@@ -109,12 +93,39 @@ async function main() {
             const value = typeof baseSalary.value === 'object' ? baseSalary.value : baseSalary;
             const min = parseSalaryNumber(value?.minValue ?? value?.value);
             const max = parseSalaryNumber(value?.maxValue);
+
             return formatSalaryRange(min, max, currency);
         };
 
+        const normalizeSalary = (raw) => {
+            if (!raw) return null;
+            if (typeof raw === 'number') return formatSalaryRange(raw, null, 'EUR');
+            if (typeof raw === 'object') return extractSalary(raw);
+
+            const clean = String(raw).replace(/\s+/g, ' ').replace(/\u00a0/g, ' ').trim();
+            if (!clean) return null;
+            const currency = /\u20ac|eur/i.test(clean) ? 'EUR' : undefined;
+            const numbers = [...clean.matchAll(/\d[\d.,\s]*\d/g)]
+                .map((m) => parseSalaryNumber(m[0]))
+                .filter((n) => Number.isFinite(n));
+
+            if (numbers.length >= 2) {
+                const min = Math.min(...numbers);
+                const max = Math.max(...numbers);
+                return formatSalaryRange(min, max, currency);
+            }
+
+            if (numbers.length === 1) return formatSalaryRange(numbers[0], null, currency) || clean;
+
+            return currency ? `${clean} (${currency})` : clean;
+        };
+
+        // -------- PAGINATION HELPER (HTML LIST) --------
         const resolveNextPageUrl = ($, request, pageNo, hasJobsOnPage) => {
             const nextPage = pageNo + 1;
             if (nextPage > MAX_PAGES) return null;
+
+            // Try various "next" link selectors first
             const labelledSelector = [
                 'a.button._pageItem_1qfbl_213.focus-dark[rel="next"]',
                 'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="next" i]',
@@ -124,26 +135,40 @@ async function main() {
                 'a[aria-label*="weiter" i]',
                 'a:contains("Weiter")',
                 'a:contains("Nächste")',
-                'a:contains("N\\u00e4chste")',
+                'a:contains("N\u00e4chste")',
                 'a:contains(">")',
                 'a:contains("»")',
                 'a:contains("›")',
             ].join(', ');
+
             const labelled = $(labelledSelector)
                 .filter((_, el) => !$(el).hasClass('disabled'))
                 .first()
                 .attr('href');
+
             if (labelled) return new URL(labelled, request.url).href;
-            const numberedCandidate = $('a[class*="pageItem"], a[class*="_pageItem"], a.button')
-                .filter((_, el) => $(el).text().trim() === String(nextPage))
+
+            // NEW: fall back to any numbered page link whose text equals the next page number
+            const numberedCandidate = $('a')
+                .filter((_, el) => {
+                    const text = $(el).text().trim();
+                    if (text !== String(nextPage)) return false;
+                    const href = $(el).attr('href') || '';
+                    if (!href || href === '#' || href.startsWith('javascript:')) return false;
+                    return true;
+                })
                 .first()
                 .attr('href');
+
             if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
+
+            // FINAL fallback: if there were jobs, try a standard ?page=N query param
             if (!hasJobsOnPage) return null;
             const urlObj = new URL(request.url);
             urlObj.searchParams.set('page', nextPage);
             return urlObj.href;
         };
+        // -------- END PAGINATION HELPER --------
 
         const extractFromJsonLd = ($) => {
             const scripts = $('script[type="application/ld+json"]');
@@ -186,23 +211,29 @@ async function main() {
             try {
                 const apiUrl = 'https://www.kununu.com/api/v1/jobs/search';
                 const params = new URLSearchParams();
+
                 if (jobTitle) params.append('q', jobTitle);
                 if (location) params.append('location', location);
                 if (homeOffice) params.append('homeOffice', 'true');
                 if (employmentType) params.append('employmentType', employmentType);
                 if (careerLevel) params.append('careerLevel', careerLevel);
                 params.append('page', page);
-                params.append('limit', 50);
+                params.append('limit', 50); // Kununu may still return ~30, that's fine.
+
                 const response = await gotScraping({
                     url: `${apiUrl}?${params.toString()}`,
                     method: 'GET',
                     useHeaderGenerator: true,
-                    headerGeneratorOptions: { devices: ['desktop'], locales: ['de-DE', 'en-US'] },
+                    headerGeneratorOptions: {
+                        devices: ['desktop'],
+                        locales: ['de-DE', 'en-US'],
+                    },
                     http2: true,
                     responseType: 'json',
                     timeout: { request: 30000 },
                     proxyUrl: proxyConf ? await proxyConf.newUrl() : undefined,
                 });
+
                 if (response.body && response.body.jobs) {
                     return response.body.jobs.map((job) => ({
                         id: job.id || job.uuid,
@@ -223,6 +254,7 @@ async function main() {
             return null;
         };
 
+        // Build initial URLs (for HTML mode)
         const initial = [];
         if (Array.isArray(startUrls) && startUrls.length) {
             initial.push(...startUrls);
@@ -232,19 +264,25 @@ async function main() {
             initial.push(buildSearchUrl(jobTitle, location, 1));
         }
 
+        // -------- API-FIRST MODE --------
         if (!startUrl && !url && !startUrls) {
             log.info('Attempting API-based scraping...');
+
             for (let page = 1; page <= MAX_PAGES && saved < RESULTS_WANTED; page++) {
                 const jobs = await tryFetchJobsViaApi(page);
+
                 if (!jobs || jobs.length === 0) {
                     log.info(`No more jobs from API at page ${page}. Switching to HTML parsing.`);
                     break;
                 }
+
                 log.info(`API returned ${jobs.length} jobs from page ${page}`);
+
                 for (const job of jobs) {
                     if (saved >= RESULTS_WANTED) break;
                     if (seenUrls.has(job.url)) continue;
                     seenUrls.add(job.url);
+
                     if (collectDetails && job.url) {
                         await requestQueue.addRequest({
                             url: job.url,
@@ -260,8 +298,12 @@ async function main() {
                         saved++;
                     }
                 }
-                if (jobs.length < 50) break;
+
+                // ❌ OLD: if (jobs.length < 50) break;
+                // Kununu often returns ~30 items even when more pages exist.
+                // We now rely ONLY on an empty page (jobs.length === 0) to stop.
             }
+
             const queueInfo = await requestQueue.getInfo();
             const hasPendingDetails = (queueInfo?.pendingRequestCount || 0) > 0;
             if (!collectDetails && saved >= RESULTS_WANTED && !hasPendingDetails) {
@@ -269,6 +311,7 @@ async function main() {
                 return;
             }
         }
+        // -------- END API-FIRST MODE --------
 
         const crawler = new CheerioCrawler({
             requestQueue,
@@ -281,13 +324,14 @@ async function main() {
             },
             maxConcurrency: MAX_CONCURRENCY,
             requestHandlerTimeoutSecs: 60,
+
             async requestHandler({ request, $, log: crawlerLog }) {
                 const label = request.userData?.label || 'LIST';
                 const pageNo = request.userData?.pageNo || 1;
+
                 if (label === 'LIST') {
-                    const remainingJobs = RESULTS_WANTED - saved - detailQueued;
-                    if (remainingJobs <= 0) return;
-                    crawlerLog.info(`Processing LIST page ${pageNo}: ${request.url}`);
+                    crawlerLog.info(`Processing LIST page: ${request.url}`);
+
                     const jobLinks = [];
                     $('a[href*="/de/job/"]').each((_, el) => {
                         const href = $(el).attr('href');
@@ -299,15 +343,19 @@ async function main() {
                             }
                         }
                     });
+
                     crawlerLog.info(`Found ${jobLinks.length} job links on page ${pageNo}`);
+
                     if (collectDetails && jobLinks.length) {
-                        const toEnqueue = jobLinks.slice(0, Math.max(0, remainingJobs));
+                        const remaining = RESULTS_WANTED - saved - detailQueued;
+                        const toEnqueue = jobLinks.slice(0, Math.max(0, remaining));
                         for (const u of toEnqueue) {
                             await requestQueue.addRequest({ url: u, userData: { label: 'DETAIL' } });
                             detailQueued++;
                         }
                     } else if (jobLinks.length) {
-                        const toPush = jobLinks.slice(0, Math.max(0, remainingJobs));
+                        const remaining = RESULTS_WANTED - saved;
+                        const toPush = jobLinks.slice(0, Math.max(0, remaining));
                         await Dataset.pushData(toPush.map((u) => ({
                             url: u,
                             title: null,
@@ -317,8 +365,8 @@ async function main() {
                         })));
                         saved += toPush.length;
                     }
-                    const stillNeeded = RESULTS_WANTED - saved - detailQueued;
-                    if (stillNeeded > 0 && pageNo < MAX_PAGES) {
+
+                    if (saved < RESULTS_WANTED && pageNo < MAX_PAGES) {
                         const nextUrl = resolveNextPageUrl($, request, pageNo, jobLinks.length > 0);
                         if (nextUrl) {
                             crawlerLog.info(`Enqueueing next page: ${nextUrl}`);
@@ -339,26 +387,44 @@ async function main() {
                         decrementQueue();
                         return;
                     }
+
                     try {
                         let data = extractFromJsonLd($);
                         const apiData = request.userData?.apiData || {};
+
                         if (!data) data = {};
                         data = { ...apiData, ...data };
-                        if (!data.title) data.title = $('h1, [class*="jobTitle"], [class*="job-title"]').first().text().trim() || null;
-                        if (!data.company) data.company = $('[class*="company"], [data-testid*="company"]').first().text().trim() || null;
-                        if (!data.location) data.location = $('[class*="location"], [class*="Location"]').first().text().trim() || null;
-                        if (!data.employment_type) data.employment_type = $('[class*="employmentType"], [class*="job-type"]').first().text().trim() || null;
+
+                        if (!data.title) {
+                            data.title = $('h1, [class*="jobTitle"], [class*="job-title"]').first().text().trim() || null;
+                        }
+
+                        if (!data.company) {
+                            data.company = $('[class*="company"], [data-testid*="company"]').first().text().trim() || null;
+                        }
+
+                        if (!data.location) {
+                            data.location = $('[class*="location"], [class*="Location"]').first().text().trim() || null;
+                        }
+
+                        if (!data.employment_type) {
+                            data.employment_type = $('[class*="employmentType"], [class*="job-type"]').first().text().trim() || null;
+                        }
+
                         if (!data.salary) {
                             const salaryText = $('[class*="salary"], [class*="Salary"]').first().text().trim();
                             data.salary = normalizeSalary(salaryText);
                         } else {
                             data.salary = normalizeSalary(data.salary);
                         }
+
                         if (!data.description_html) {
                             const desc = $('[class*="job-description"], [class*="jobDescription"], [class*="description"]').first();
                             data.description_html = desc && desc.length ? desc.html()?.trim() : null;
                         }
+
                         data.description_text = data.description_html ? cleanText(data.description_html) : null;
+
                         const item = {
                             title: data.title || null,
                             company: data.company || null,
@@ -373,6 +439,7 @@ async function main() {
                             url: request.url,
                             source: data.source || 'kununu',
                         };
+
                         await Dataset.pushData(item);
                         saved++;
                         crawlerLog.info(`Saved job ${saved}/${RESULTS_WANTED}: ${item.title}`);
@@ -386,30 +453,20 @@ async function main() {
         });
 
         const queueInfoAfterApi = await requestQueue.getInfo();
-        const pendingAfterApi = queueInfoAfterApi?.pendingRequestCount || 0;
-        if (saved + detailQueued < RESULTS_WANTED && pendingAfterApi === 0) {
+        const hasPending = (queueInfoAfterApi?.pendingRequestCount || 0) > 0;
+
+        if (saved + detailQueued < RESULTS_WANTED && (!hasPending || initial.length)) {
             for (const u of initial) {
-                if (!u) continue;
-                const isJob = isJobUrl(u);
-                let pageNo = 1;
-                try {
-                    pageNo = Number(new URL(u).searchParams.get('page')) || 1;
-                } catch { /* ignore */ }
                 await requestQueue.addRequest({
                     url: u,
-                    userData: { label: isJob ? 'DETAIL' : 'LIST', pageNo },
+                    userData: { label: 'LIST', pageNo: 1 },
                 });
             }
         }
 
-        const queueInfoBeforeRun = await requestQueue.getInfo();
-        if ((queueInfoBeforeRun?.pendingRequestCount || 0) === 0) {
-            log.info(`Nothing to crawl. Finished with ${saved} items.`);
-            return;
-        }
-
         log.info('Starting crawler...');
         await crawler.run();
+
         log.info(`Finished. Saved ${saved} job listings from Kununu.`);
     } finally {
         await Actor.exit();
