@@ -1,0 +1,94 @@
+{
+  "title": "Kununu Jobs Scraper",
+  "description": "Extract job listings from Kununu.com, Germany's leading employer review platform. Search by job title, location, employment type, and more. Supports API-first scraping with HTML fallback for maximum reliability.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "startUrl": {
+      "title": "Start URL",
+      "type": "string",
+      "description": "Start scraping from a specific Kununu search URL (e.g., https://www.kununu.com/de/jobs?q=developer&l=berlin). If provided, this overrides other search parameters.",
+      "editor": "textfield",
+      "example": "https://www.kununu.com/de/jobs?q=software%20engineer&l=berlin"
+    },
+    "jobTitle": {
+      "title": "Job Title",
+      "type": "string",
+      "description": "Job title or keyword to search for (e.g., 'Software Engineer', 'Marketing Manager', 'Data Scientist').",
+      "editor": "textfield",
+      "prefill": "Software Engineer",
+      "example": "Product Manager"
+    },
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "City or region in Germany (e.g., 'Berlin', 'München', 'Hamburg', 'Frankfurt').",
+      "editor": "textfield",
+      "prefill": "Berlin",
+      "example": "München"
+    },
+    "homeOffice": {
+      "title": "Home Office",
+      "type": "boolean",
+      "description": "Filter for remote/home office positions only.",
+      "editor": "checkbox",
+      "default": false
+    },
+    "employmentType": {
+      "title": "Employment Type",
+      "type": "string",
+      "description": "Employment type filter (e.g., 'vollzeit' for full-time, 'teilzeit' for part-time, 'praktikum' for internship, 'minijobs').",
+      "editor": "select",
+      "enum": ["", "vollzeit", "teilzeit", "praktikum", "minijobs", "ausbildung", "werkstudent"],
+      "enumTitles": ["All Types", "Full-time (Vollzeit)", "Part-time (Teilzeit)", "Internship (Praktikum)", "Mini Jobs", "Apprenticeship (Ausbildung)", "Working Student (Werkstudent)"],
+      "default": ""
+    },
+    "careerLevel": {
+      "title": "Career Level",
+      "type": "string",
+      "description": "Career level filter for targeting specific experience levels.",
+      "editor": "select",
+      "enum": ["", "berufseinsteiger", "berufserfahren", "fuehrungskraft", "student", "auszubildende"],
+      "enumTitles": ["All Levels", "Entry Level", "Professional", "Executive", "Student", "Trainee"],
+      "default": ""
+    },
+    "collectDetails": {
+      "title": "Collect Full Job Details",
+      "type": "boolean",
+      "description": "When enabled, scraper visits each job detail page to extract complete descriptions and additional information. Disable for faster scraping with basic data only.",
+      "editor": "checkbox",
+      "default": true
+    },
+    "results_wanted": {
+      "title": "Maximum Number of Jobs",
+      "type": "integer",
+      "description": "Maximum number of job listings to extract. Set higher for comprehensive results or lower for quick tests.",
+      "minimum": 1,
+      "maximum": 10000,
+      "default": 100,
+      "editor": "number",
+      "example": 50
+    },
+    "max_pages": {
+      "title": "Maximum Pages to Scrape",
+      "type": "integer",
+      "description": "Safety limit on the number of search result pages to process. Prevents excessive scraping.",
+      "minimum": 1,
+      "maximum": 100,
+      "editor": "number",
+      "default": 20
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Proxy settings for the scraper. Residential proxies recommended for Kununu to avoid rate limits and blocking.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
+      }
+    }
+  },
+  "required": [],
+  "additionalProperties": false
+}

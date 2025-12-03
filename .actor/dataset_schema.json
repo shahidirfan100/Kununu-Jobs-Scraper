@@ -1,0 +1,120 @@
+{
+  "actorSpecification": 1,
+  "fields": {},
+  "views": {
+    "overview": {
+      "title": "Overview",
+      "transformation": {
+        "fields": [
+          "title",
+          "company",
+          "location",
+          "employment_type",
+          "salary",
+          "date_posted",
+          "url"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "title": {
+            "label": "Job Title",
+            "format": "text"
+          },
+          "company": {
+            "label": "Company",
+            "format": "text"
+          },
+          "location": {
+            "label": "Location",
+            "format": "text"
+          },
+          "employment_type": {
+            "label": "Employment Type",
+            "format": "text"
+          },
+          "salary": {
+            "label": "Salary",
+            "format": "text"
+          },
+          "date_posted": {
+            "label": "Posted Date",
+            "format": "text"
+          },
+          "url": {
+            "label": "Job URL",
+            "format": "link"
+          }
+        }
+      }
+    },
+    "detailed": {
+      "title": "Detailed View",
+      "transformation": {
+        "fields": [
+          "title",
+          "company",
+          "company_url",
+          "location",
+          "employment_type",
+          "salary",
+          "date_posted",
+          "valid_through",
+          "description_text",
+          "url",
+          "source"
+        ]
+      },
+      "display": {
+        "component": "table",
+        "properties": {
+          "title": {
+            "label": "Job Title",
+            "format": "text"
+          },
+          "company": {
+            "label": "Company",
+            "format": "text"
+          },
+          "company_url": {
+            "label": "Company Profile",
+            "format": "link"
+          },
+          "location": {
+            "label": "Location",
+            "format": "text"
+          },
+          "employment_type": {
+            "label": "Employment Type",
+            "format": "text"
+          },
+          "salary": {
+            "label": "Salary Range",
+            "format": "text"
+          },
+          "date_posted": {
+            "label": "Posted",
+            "format": "text"
+          },
+          "valid_through": {
+            "label": "Valid Until",
+            "format": "text"
+          },
+          "description_text": {
+            "label": "Description",
+            "format": "text"
+          },
+          "url": {
+            "label": "Job URL",
+            "format": "link"
+          },
+          "source": {
+            "label": "Source",
+            "format": "text"
+          }
+        }
+      }
+    }
+  }
+}
