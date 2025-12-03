@@ -76,7 +76,16 @@
       "minimum": 1,
       "maximum": 100,
       "editor": "number",
-      "default": 20
+      "default": 50
+    },
+    "maxConcurrency": {
+      "title": "Max Concurrency",
+      "type": "integer",
+      "description": "Crawler concurrency (1-50). Increase for speed, lower if the site throttles.",
+      "minimum": 1,
+      "maximum": 50,
+      "default": 20,
+      "editor": "number"
     },
     "proxyConfiguration": {
       "title": "Proxy Configuration",

@@ -102,16 +102,22 @@ Configure the scraper using these parameters:
 <td>Maximum number of jobs to extract (1-10000)</td>
 <td>100</td>
 </tr>
-<tr>
-<td><code>max_pages</code></td>
-<td>Integer</td>
-<td>Maximum search result pages to process (1-100)</td>
-<td>20</td>
-</tr>
-<tr>
-<td><code>proxyConfiguration</code></td>
-<td>Object</td>
-<td>Apify proxy settings (residential proxies recommended)</td>
+  <tr>
+  <td><code>max_pages</code></td>
+  <td>Integer</td>
+  <td>Maximum search result pages to process (1-100)</td>
+  <td>50</td>
+  </tr>
+  <tr>
+  <td><code>maxConcurrency</code></td>
+  <td>Integer</td>
+  <td>Crawler concurrency (1-50). Increase for speed, lower if the site throttles.</td>
+  <td>20</td>
+  </tr>
+  <tr>
+  <td><code>proxyConfiguration</code></td>
+  <td>Object</td>
+  <td>Apify proxy settings (residential proxies recommended)</td>
 <td>Residential</td>
 </tr>
 </tbody>
