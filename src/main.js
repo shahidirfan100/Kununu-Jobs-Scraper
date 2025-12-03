@@ -135,7 +135,7 @@ async function main() {
                 'a[aria-label*="weiter" i]',
                 'a:contains("Weiter")',
                 'a:contains("Nächste")',
-                'a:contains("N\u00e4chste")',
+                'a:contains("N\\u00e4chste")',
                 'a:contains(">")',
                 'a:contains("»")',
                 'a:contains("›")',
@@ -148,24 +148,24 @@ async function main() {
 
             if (labelled) return new URL(labelled, request.url).href;
 
-            // NEW: fall back to any numbered page link whose text equals the next page number
-            const numberedCandidate = $('a')
+            // NEW: fall back to numbered links or any link containing the next page query
+            const numberedCandidate = $('a[href]')
                 .filter((_, el) => {
                     const text = $(el).text().trim();
-                    if (text !== String(nextPage)) return false;
                     const href = $(el).attr('href') || '';
                     if (!href || href === '#' || href.startsWith('javascript:')) return false;
-                    return true;
+                    if (text === String(nextPage)) return true;
+                    return href.includes(`page=${nextPage}`);
                 })
                 .first()
                 .attr('href');
 
             if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
 
-            // FINAL fallback: if there were jobs, try a standard ?page=N query param
-            if (!hasJobsOnPage) return null;
+            // FINAL fallback: increment ?page= param directly
             const urlObj = new URL(request.url);
-            urlObj.searchParams.set('page', nextPage);
+            const currentFromQuery = Number(urlObj.searchParams.get('page')) || pageNo;
+            urlObj.searchParams.set('page', currentFromQuery + 1);
             return urlObj.href;
         };
         // -------- END PAGINATION HELPER --------
@@ -217,8 +217,8 @@ async function main() {
                 if (homeOffice) params.append('homeOffice', 'true');
                 if (employmentType) params.append('employmentType', employmentType);
                 if (careerLevel) params.append('careerLevel', careerLevel);
-                // Kununu pagination appears zero-based; use pageIndex directly.
-                params.append('page', pageIndex);
+                // Kununu uses 1-based page query for public results; shift by +1.
+                params.append('page', pageIndex + 1);
                 params.append('limit', 50); // Kununu may still return ~30, that's fine.
 
                 const response = await gotScraping({
