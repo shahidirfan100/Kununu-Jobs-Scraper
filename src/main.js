@@ -29,7 +29,7 @@ async function main() {
         const MAX_PAGES = Number.isFinite(+MAX_PAGES_RAW) ? Math.max(1, +MAX_PAGES_RAW) : 50;
         const MAX_CONCURRENCY = Number.isFinite(+maxConcurrencyInput) && +maxConcurrencyInput > 0
             ? Math.min(+maxConcurrencyInput, 50)
-            : 20;
+            : 12; // conservative default to reduce blocking
 
         const proxyConf = proxyConfiguration ? await Actor.createProxyConfiguration({ ...proxyConfiguration }) : undefined;
         const requestQueue = await Actor.openRequestQueue();
@@ -318,11 +318,29 @@ async function main() {
             maxRequestRetries: 2,
             useSessionPool: true,
             sessionPoolOptions: {
-                maxPoolSize: Math.max(4, Math.ceil(MAX_CONCURRENCY / 2)),
-                sessionOptions: { maxUsageCount: 20 },
+                maxPoolSize: Math.max(6, Math.ceil(MAX_CONCURRENCY)),
+                sessionOptions: { maxUsageCount: 8 },
             },
             maxConcurrency: MAX_CONCURRENCY,
             requestHandlerTimeoutSecs: 60,
+            useHeaderGenerator: true,
+            headerGeneratorOptions: {
+                browsers: ['chrome', 'firefox'],
+                devices: ['desktop'],
+                locales: ['de-DE', 'en-US'],
+            },
+            preNavigationHooks: [
+                async ({ request }) => {
+                    request.headers = {
+                        ...request.headers,
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                        'cache-control': 'no-cache',
+                        pragma: 'no-cache',
+                    };
+                },
+            ],
 
             async requestHandler({ request, $, log: crawlerLog }) {
                 const label = request.userData?.label || 'LIST';
