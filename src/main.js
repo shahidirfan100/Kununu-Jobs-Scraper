@@ -299,9 +299,7 @@ async function main() {
                     }
                 }
 
-                // ❌ OLD: if (jobs.length < 50) break;
-                // Kununu often returns ~30 items even when more pages exist.
-                // We now rely ONLY on an empty page (jobs.length === 0) to stop.
+                // Keep paging until API returns 0 jobs (or limits reached).
             }
 
             const queueInfo = await requestQueue.getInfo();
