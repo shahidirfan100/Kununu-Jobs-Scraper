@@ -148,50 +148,72 @@ async function main() {
             const nextPage = pageNo + 1;
             if (nextPage > MAX_PAGES) return null;
 
-            // Try "next" buttons
-            const labelledSelector = [
-                'a.button._pageItem_1qfbl_213.focus-dark[rel="next"]',
-                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="next" i]',
-                'a.button._pageItem_1qfbl_213.focus-dark[aria-label*="weiter" i]',
+            // 1. Try robust "Next" button selectors
+            // Look for standard attributes first
+            const nextSelectors = [
                 'a[rel="next"]',
                 'a[aria-label*="next" i]',
                 'a[aria-label*="weiter" i]',
-                'a:contains("Weiter")',
-                'a:contains("Nächste")',
-                'a:contains("N\u00e4chste")',
-                'a:contains(">")',
-                'a:contains("»")',
-                'a:contains("›")',
-            ].join(', ');
+                'a[class*="next" i]',
+                'a[class*="weiter" i]',
+            ];
 
-            const labelled = $(labelledSelector)
-                .filter((_, el) => !$(el).hasClass('disabled'))
-                .first()
-                .attr('href');
+            for (const sel of nextSelectors) {
+                const $el = $(sel).first();
+                if ($el.length && !$el.hasClass('disabled')) {
+                    const href = $el.attr('href');
+                    if (href && href !== '#' && !href.startsWith('javascript:')) {
+                        return new URL(href, request.url).href;
+                    }
+                }
+            }
 
-            if (labelled) return new URL(labelled, request.url).href;
+            // 2. Try finding "Next" by text content
+            const potentialNextLinks = $('a').filter((_, el) => {
+                const t = $(el).text().trim().toLowerCase();
+                return t === 'weiter' || t === 'next' || t === 'nächste' || t === 'vor' || t === '>' || t === '»' || t === '›';
+            });
 
-            // Try numbered page link, e.g. "2"
-            const numberedCandidate = $(
-                'a[class*="pageItem"], a[class*="_pageItem"], a.button',
-            )
-                .filter((_, el) => {
-                    const text = $(el).text().trim();
-                    if (text !== String(nextPage)) return false;
-                    const href = $(el).attr('href') || '';
-                    if (!href || href === '#' || href.startsWith('javascript:')) return false;
-                    return true;
-                })
-                .first()
-                .attr('href');
+            if (potentialNextLinks.length > 0) {
+                const valid = potentialNextLinks.filter((_, el) => !$(el).hasClass('disabled') && $(el).attr('href'));
+                if (valid.length) {
+                    return new URL(valid.first().attr('href'), request.url).href;
+                }
+            }
 
-            if (numberedCandidate) return new URL(numberedCandidate, request.url).href;
+            // 3. Try numbered page link for (pageNo + 1)
+            // Look for links that are just a number matching nextPage
+            const numberedLinks = $('a').filter((_, el) => {
+                const t = $(el).text().trim();
+                return t === String(nextPage);
+            });
 
-            // Fallback: if there were jobs, try ?page=N
-            if (!hasJobsOnPage) return null;
-            const urlObj = new URL(request.url);
-            urlObj.searchParams.set('page', nextPage);
-            return urlObj.href;
+            if (numberedLinks.length > 0) {
+                // Filter for likely pagination items to avoid false positives
+                const likelyPagination = numberedLinks.filter((_, el) => {
+                    const $el = $(el);
+                    const parent = $el.parent();
+                    const grandParent = parent.parent();
+                    // Check for common pagination classes or context
+                    const classes = ($el.attr('class') || '') + (parent.attr('class') || '') + (grandParent.attr('class') || '');
+                    return /page|pagination|nav/i.test(classes) || $el.closest('nav').length > 0;
+                });
+
+                if (likelyPagination.length) {
+                    const href = likelyPagination.first().attr('href');
+                    if (href) return new URL(href, request.url).href;
+                }
+            }
+
+            // 4. Fallback: if there were jobs, try ?page=N
+            // This is the most reliable fallback if the URL structure supports it
+            if (hasJobsOnPage) {
+                const urlObj = new URL(request.url);
+                urlObj.searchParams.set('page', nextPage);
+                return urlObj.href;
+            }
+
+            return null;
         };
         // -------- end HTML pagination helper --------
 
