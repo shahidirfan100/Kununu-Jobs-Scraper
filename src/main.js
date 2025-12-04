@@ -168,10 +168,9 @@ async function main() {
                 }
             }
 
-            // 2. Try finding "Next" by text content
             const potentialNextLinks = $('a').filter((_, el) => {
                 const t = $(el).text().trim().toLowerCase();
-                return t === 'weiter' || t === 'next' || t === 'nächste' || t === 'vor' || t === '>' || t === '»' || t === '›';
+                return t === 'weiter' || t === 'next' || t === 'nächste' || t === '>' || t === '»' || t === '›';
             });
 
             if (potentialNextLinks.length > 0) {
